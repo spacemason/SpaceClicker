@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Click your way through the solar system — an idle clicker game with 8 progressive levels from Mercury to Neptune.",
-  "author": "Philip Diffenderfer",
+  "author": "Mason",
   "game": {
     "type": "static",
     "title": "Space Clicker",
