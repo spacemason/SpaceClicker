@@ -1500,6 +1500,42 @@ document.addEventListener('keyup', (e) => {
   }
 });
 
+// --- Touch hold rapid click (mirrors the spacebar) ---
+let touchHeld = false;
+let touchInterval = null;
+
+function stopTouchRapidFire() {
+  touchHeld = false;
+  if (touchInterval) {
+    clearInterval(touchInterval);
+    touchInterval = null;
+  }
+}
+
+document.getElementById('planet').addEventListener('touchstart', (e) => {
+  // Only works on game screen
+  if (!document.getElementById('game-screen').classList.contains('active')) return;
+  // Prevent the synthetic mouse/click event so holds don't double-count
+  e.preventDefault();
+
+  if (!touchHeld) {
+    touchHeld = true;
+    // Immediate first click
+    handleClick({ clientX: 0, clientY: 0 });
+    // Start rapid fire
+    touchInterval = setInterval(() => {
+      handleClick({ clientX: 0, clientY: 0 });
+    }, 50);
+  }
+}, { passive: false });
+
+document.getElementById('planet').addEventListener('touchend', (e) => {
+  e.preventDefault();
+  stopTouchRapidFire();
+}, { passive: false });
+
+document.getElementById('planet').addEventListener('touchcancel', stopTouchRapidFire);
+
 // Boot
 generateStars();
 updateContinueButton();
