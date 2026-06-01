@@ -786,11 +786,66 @@ function generateStars() {
   document.head.appendChild(style);
 }
 
+// --- diffenderfer.games hub (leaderboard + cloud save) ---
+// Uses the host-injected SDK (window.HubSDK); all calls no-op when offline or
+// logged out. The "score" board = total clicks; the cloud save mirrors the
+// whole state so a signed-in player resumes anywhere.
+function hubClient() { return (window.HubSDK && window.HubSDK.hub) || null; }
+function clickTotal(s) { return (s && s.clicks) ? s.clicks.reduce((a, b) => a + b, 0) : 0; }
+
+// Debounced push: leaderboard score + cloud save. Only takes effect signed in.
+let hubTimer = null;
+function hubPush() {
+  if (hubTimer) return; // a push is already scheduled — coalesce
+  hubTimer = setTimeout(() => {
+    hubTimer = null;
+    const h = hubClient();
+    if (!h) return;
+    // Ensure a hub session (guest or account) first, else the authenticated
+    // score submit + cloud save silently 401 when no guest exists yet.
+    Promise.resolve(h.ensureGuest && h.ensureGuest()).catch(() => {}).then(function () {
+      try {
+        h.submitScore('score', clickTotal(state), { title: 'Top Score', sort: 'desc' }).catch(() => {});
+        h.putSave('main', state).catch(() => {});
+      } catch (e) { /* never break the game over the hub */ }
+    });
+  }, 4000);
+}
+
+// Pull the cloud save; adopt it only when it represents more progress than the
+// local save (clicks only grow), otherwise seed the cloud from local. Called
+// on "Continue".
+async function hubLoadCloud() {
+  const h = hubClient();
+  if (!h) return;
+  try {
+    const r = await h.getSave('main');
+    const cloud = r && r.save && r.save.data;
+    if (cloud && cloud.clicks && clickTotal(cloud) > clickTotal(state)) {
+      state = cloud;
+      if (!state.upgrades) state.upgrades = {};
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) {}
+      if (state.completed.every(c => c)) { showScreen('complete-screen'); return; }
+      showScreen('game-screen');
+      renderTabs(); renderLevel(); renderUpgrades();
+    } else {
+      h.putSave('main', state).catch(() => {});
+    }
+  } catch (e) { /* logged out / offline → keep local */ }
+}
+
+// Logging in mid-session uploads the current progress (never clobbers play).
+window.addEventListener('hub:auth', () => {
+  const h = hubClient();
+  if (h) { try { h.putSave('main', state).catch(() => {}); } catch (e) {} }
+});
+
 // --- Save / Load ---
 function saveGame() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(state));
   } catch (e) {}
+  hubPush();
 }
 
 function loadGame() {
@@ -1120,6 +1175,10 @@ function initGame(fresh) {
     }
   }
   saveGame();
+
+  // Resume from the cloud if signed in and it has more progress (async; may
+  // re-render). Only on Continue — New Game intentionally starts fresh.
+  if (!fresh) hubLoadCloud();
 
   // If all levels are already completed, go straight to the end screen
   if (state.completed.every(c => c)) {

@@ -9,6 +9,9 @@
     "title": "Space Clicker",
     "serveDir": ".",
     "image": "images/earth.png",
-    "description": "Click your way through the solar system. Unlock 8 planets in order — Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune — finishing each one to access the next."
+    "description": "Click your way through the solar system. Unlock 8 planets in order — Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune — finishing each one to access the next.",
+    "leaderboards": [
+      { "key": "score", "title": "Top Score", "sort": "desc" }
+    ]
   }
 }
