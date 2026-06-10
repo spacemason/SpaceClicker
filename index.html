@@ -758,6 +758,12 @@ const UPGRADES = [
 ];
 
 const SAVE_KEY = 'spaceClickerSave';
+// Saves are scoped PER USER so switching accounts never shows/seeds another
+// user's run. curUid is the hub user id our local state belongs to (null = anon).
+let curUid = null;
+const keyFor = (uid)=> SAVE_KEY+'::u'+(uid==null?'anon':uid);
+function freshState(){ return { currentLevel:0, highestUnlocked:0,
+  clicks:[0,0,0,0,0,0,0,0], completed:[false,false,false,false,false,false,false,false], upgrades:{} }; }
 
 let state = {
   currentLevel: 0,
@@ -834,23 +840,60 @@ async function hubLoadCloud() {
   } catch (e) { /* logged out / offline → keep local */ }
 }
 
-// Logging in mid-session uploads the current progress (never clobbers play).
-window.addEventListener('hub:auth', () => {
+// Resolve who we are, scope storage to them, and migrate a pre-multiuser save
+// once. Enables Continue when this account has local OR cloud progress.
+function resolveIdentity() {
   const h = hubClient();
-  if (h) { try { h.putSave('main', state).catch(() => {}); } catch (e) {} }
+  if (!h) { updateContinueButton(); return; }
+  Promise.resolve(h.ensureGuest && h.ensureGuest()).catch(() => {})
+    .then(() => h.me()).then((r) => {
+      curUid = (r && r.user) ? r.user.id : null;
+      // one-time: fold the old global save into this identity if it has none
+      try {
+        if (localStorage.getItem(keyFor(curUid)) == null) {
+          const legacy = localStorage.getItem(SAVE_KEY);
+          if (legacy) { localStorage.setItem(keyFor(curUid), legacy); localStorage.removeItem(SAVE_KEY); }
+        }
+      } catch (e) {}
+      updateContinueButton();
+      // also enable Continue if only the cloud has progress (new device)
+      h.getSave('main').then((rr) => {
+        const cloud = rr && rr.save && rr.save.data;
+        if (cloud && cloud.clicks && clickTotal(cloud) > 0) {
+          const btn = document.getElementById('btn-continue'); if (btn) btn.disabled = false;
+        }
+      }).catch(() => {});
+    }).catch(() => updateContinueButton());
+}
+
+// Login/out via the menu: the identity changed. Drop the previous user's run,
+// re-scope to the new account, and return to the menu so their data loads on
+// Continue. Never pushes the old user's state into the new account.
+window.addEventListener('hub:auth', () => {
+  curUid = null;
+  if (autoClickInterval) clearInterval(autoClickInterval);
+  state = freshState();
+  showScreen('start-menu');
+  resolveIdentity();
+});
+// Reset game (hub menu): clear this account's local cache before the reload.
+window.addEventListener('hub:reset', () => {
+  try { localStorage.removeItem(keyFor(curUid)); localStorage.removeItem(SAVE_KEY); } catch (e) {}
 });
 
-// --- Save / Load ---
+// --- Save / Load (scoped to the current account) ---
 function saveGame() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+    localStorage.setItem(keyFor(curUid), JSON.stringify(state));
   } catch (e) {}
   hubPush();
 }
 
 function loadGame() {
   try {
-    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    let raw = localStorage.getItem(keyFor(curUid));
+    if (raw == null && curUid == null) raw = localStorage.getItem(SAVE_KEY); // legacy
+    const data = JSON.parse(raw);
     if (data && data.clicks) return data;
   } catch (e) {}
   return null;
@@ -1195,7 +1238,7 @@ function initGame(fresh) {
 
 function restartGame() {
   if (autoClickInterval) clearInterval(autoClickInterval);
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  try { localStorage.removeItem(keyFor(curUid)); } catch (e) {}
   state = {
     currentLevel: 0,
     highestUnlocked: 0,
@@ -1598,6 +1641,7 @@ document.getElementById('planet').addEventListener('touchcancel', stopTouchRapid
 // Boot
 generateStars();
 updateContinueButton();
+resolveIdentity();   // scope saves to the signed-in account; enable Continue from cloud
 </script>
 </body>
 </html>
