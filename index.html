@@ -1572,35 +1572,13 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
 let spaceHeld = false;
 let spaceInterval = null;
 
-document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space') return;
-  // Don't intercept if typing in an input field
-  if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
-  e.preventDefault();
-  // Only works on game screen
-  if (!document.getElementById('game-screen').classList.contains('active')) return;
-
-  if (!spaceHeld) {
-    spaceHeld = true;
-    // Immediate first click
-    handleClick({ clientX: 0, clientY: 0 });
-    // Start rapid fire after a short delay
-    spaceInterval = setInterval(() => {
-      handleClick({ clientX: 0, clientY: 0 });
-    }, 50);
-  }
-});
-
-document.addEventListener('keyup', (e) => {
-  if (e.code !== 'Space') return;
-  if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
-  e.preventDefault();
-  spaceHeld = false;
-  if (spaceInterval) {
-    clearInterval(spaceInterval);
-    spaceInterval = null;
-  }
-});
+// NOTE: spacebar rapid-fire is now handled by the diffenderfer.games unified
+// input system (the module script near the bottom of this file) via the
+// 'click' input, so the same code path drives Space, the gamepad A button,
+// and the on-screen TAP control. The legacy Space keydown/keyup handlers were
+// removed to avoid double-counting; spaceHeld/spaceInterval are kept declared
+// for compatibility but are no longer used here.
+void spaceHeld; void spaceInterval;
 
 // --- Touch hold rapid click (mirrors the spacebar) ---
 let touchHeld = false;
@@ -1638,10 +1616,99 @@ document.getElementById('planet').addEventListener('touchend', (e) => {
 
 document.getElementById('planet').addEventListener('touchcancel', stopTouchRapidFire);
 
+// --- Bridge for the hub input module (separate module scope) ---
+// Exposes the bits the unified-input integration below needs without
+// otherwise touching gameplay. A single "main click" entry point used by
+// space / gamepad A / the on-screen TAP control.
+window.SpaceClicker = {
+  mainClick() { handleClick({ clientX: 0, clientY: 0 }); },
+  isGameActive() {
+    return document.getElementById('game-screen').classList.contains('active');
+  },
+};
+
 // Boot
 generateStars();
 updateContinueButton();
 resolveIdentity();   // scope saves to the signed-in account; enable Continue from cloud
+</script>
+
+<!-- diffenderfer.games unified input: first-class gamepad + touch support.
+     Additive — the existing mouse / spacebar / touch handlers above keep
+     working untouched. Loads the canonical hub client served by the host. -->
+<script type="module">
+  import { hub } from '/_hub/hub.js';
+
+  const game = window.SpaceClicker || {};
+  const mainClick   = () => { try { game.mainClick && game.mainClick(); } catch (e) {} };
+  const gameActive  = () => { try { return !!(game.isGameActive && game.isGameActive()); } catch (e) { return false; } };
+
+  // Declare named inputs once. The 'click' input fires the main click from
+  // Space, the gamepad A button, or the on-screen TAP control (touch).
+  // The 'menu' group lets a controller / keys traverse the upgrade buttons.
+  hub.input.define({
+    groups: {
+      play: {
+        inputs: {
+          // Mouse is intentionally NOT mapped here: clicking the planet is
+          // already handled by its own click listener, so adding a global
+          // mouse:button0 would double-count. Space/A/TAP are the additions.
+          click: {
+            keys:    [' '],
+            gamepad: { button: 0 },          // A
+            touch:   { button: 'tap' },
+          },
+        },
+        virtual: [
+          { id:'tap', type:'button', place:'bottom', shape:'pill', size:140, label:'TAP' },
+        ],
+      },
+      upgrades: {
+        navigable: {
+          prev:'navPrev', next:'navNext', up:'navUp', down:'navDown', act:'navAct',
+          elements: () => Array.from(
+            document.querySelectorAll('#upgrade-list .upgrade-buy:not([disabled])')
+          ),
+        },
+        inputs: {
+          navPrev: { keys:['ArrowLeft'],  gamepad:{ button:14 } },   // dpad left
+          navNext: { keys:['ArrowRight'], gamepad:{ button:15 } },   // dpad right
+          navUp:   { keys:['ArrowUp'],    gamepad:{ button:12 } },   // dpad up
+          navDown: { keys:['ArrowDown'],  gamepad:{ button:13 } },   // dpad down
+          navAct:  { keys:['Enter'],      gamepad:{ button:1 } },    // B = buy
+        },
+      },
+    },
+  });
+
+  // Keep both groups enabled only while the game screen is showing so the
+  // virtual TAP control and upgrade navigation don't appear on menus.
+  let enabled = false;
+  function syncGroups() {
+    const active = gameActive();
+    if (active === enabled) return;
+    enabled = active;
+    if (active) { hub.input.enable('play'); hub.input.enable('upgrades'); }
+    else        { hub.input.disable('play'); hub.input.disable('upgrades'); }
+  }
+
+  // Drive the 'click' input. Edge-trigger so a tap = one click; while held
+  // (space / A / TAP), repeat at the same cadence as the existing rapid-fire.
+  let holding = false, lastRepeat = 0;
+  const REPEAT_MS = 50;
+  function loop(now) {
+    syncGroups();
+    if (enabled) {
+      if (hub.input.down('click')) { mainClick(); holding = true; lastRepeat = now; }
+      else if (hub.input.value('click') >= 0.5) {
+        if (now - lastRepeat >= REPEAT_MS) { mainClick(); lastRepeat = now; }
+      } else {
+        holding = false;
+      }
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
 </script>
 </body>
 </html>
