@@ -1644,7 +1644,8 @@ resolveIdentity();   // scope saves to the signed-in account; enable Continue fr
   const gameActive  = () => { try { return !!(game.isGameActive && game.isGameActive()); } catch (e) { return false; } };
 
   // Declare named inputs once. The 'click' input fires the main click from
-  // Space, the gamepad A button, or the on-screen TAP control (touch).
+  // Space or the gamepad A button (tapping the planet is handled by the
+  // planet's own touchstart handler, so no virtual control is needed).
   // The 'menu' group lets a controller / keys traverse the upgrade buttons.
   hub.input.define({
     groups: {
@@ -1652,16 +1653,17 @@ resolveIdentity();   // scope saves to the signed-in account; enable Continue fr
         inputs: {
           // Mouse is intentionally NOT mapped here: clicking the planet is
           // already handled by its own click listener, so adding a global
-          // mouse:button0 would double-count. Space/A/TAP are the additions.
+          // mouse:button0 would double-count. Space/A are the additions.
           click: {
             keys:    [' '],
             gamepad: { button: 0 },          // A
             touch:   { button: 'tap' },
           },
         },
-        virtual: [
-          { id:'tap', type:'button', place:'bottom', shape:'pill', size:140, label:'TAP' },
-        ],
+        // No virtual control: on a clicker, tapping the planet directly is
+        // sufficient (the planet has its own touchstart handler), so an
+        // on-screen TAP button is redundant.
+        virtual: [],
       },
       upgrades: {
         navigable: {
@@ -1682,7 +1684,7 @@ resolveIdentity();   // scope saves to the signed-in account; enable Continue fr
   });
 
   // Keep both groups enabled only while the game screen is showing so the
-  // virtual TAP control and upgrade navigation don't appear on menus.
+  // upgrade navigation doesn't appear / fire on menus.
   let enabled = false;
   function syncGroups() {
     const active = gameActive();
@@ -1693,7 +1695,7 @@ resolveIdentity();   // scope saves to the signed-in account; enable Continue fr
   }
 
   // Drive the 'click' input. Edge-trigger so a tap = one click; while held
-  // (space / A / TAP), repeat at the same cadence as the existing rapid-fire.
+  // (space / A), repeat at the same cadence as the existing rapid-fire.
   let holding = false, lastRepeat = 0;
   const REPEAT_MS = 50;
   function loop(now) {
